@@ -1,0 +1,7 @@
+"*":
+  core:
+    disabledPackages: [
+      "atom-terminal-panel"
+    ]
+  "exception-reporting":
+    userId: "e5d74b83-cbb6-47ef-bc9b-c5f4cad83bf9"
