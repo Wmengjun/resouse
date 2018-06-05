@@ -1,0 +1,263 @@
+需要转义的元字符：^$()*.+?[\{|
+
+1.巴西GVT需要将收到的reINVITE中如下SDP的a=inactive改成a=sendonly：
+a=sendonly
+m=audio 52034 RTP/AVP 18 8 101
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-15
+a=ptime:20
+a=fmtp:18 annexb=no
+a=inactive
+m=image 60226 udptl t38
+a=T38FaxVersion:0
+a=T38FaxMaxBuffer:1100
+a=T38FaxMaxDatagram:612
+a=T38MaxBitRate:14400
+a=T38FaxRateManagement:transferredTCF
+a=T38FaxUdpEC:t38UDPRedundancy
+
+SIP信令适配的原理是将整个SDP做为一个文本，通过正则表达式进行匹配，对匹配到的内容进行增删改等操作。
+
+如果只是简单地将a=inactive改成a=sendonly，正则表达式做完全匹配即可：
+ADD SIPRGEXFLT: RGEXN="T38", SFN=1, MT=INREQUEST, MM=INVITE, RGEX="a=inactive", RFT=Replace-SDP-Line, NRV="a=sendonly";
+
+但是这样做影响范围太大了，会影响许多正常业务。
+
+经过考虑，需要结合如下4个关键行进行精确匹配。
+a=sendonly
+m=audio 52034 RTP/AVP 18 8 101
+a=inactive
+m=image 60226 udptl t38
+
+适配方法如下：
+ADD SIPRGEXFLT: RGEXN="T38", SFN=1, MT=INREQUEST, MM=INVITE, RGEX="sendonly.*\\sm=audio(.*\\s){1,}.*(inactive).*\\sm=image", RFT=Replace-SDP-Para, FNUM=2, NRV="sendonly";
+MOD SIPTG: TGN="V_SIP_2", SFN=1;
+1.".*"代表除换行符以外是任意n个字符
+2."\s"代表任意空白字符，包括换行符
+3. "\\s"多一个\是为了对\s进行转义
+4. (.*\\s)：小括号括起来代表第1个子表达式
+5. {1,}：代表前边的子表达式重复1-n次
+6. (inactive) ：小括号括起来代表第2个子表达式
+7. FNUM=2, NRV="sendonly"--表示将第2个子表达式替换掉。
+
+正则表达式是相当强大的。
+
+
+2.要求在出局INVITE时干掉Route和PEM头域
+
+ADD SIPFLTSET: SFN="test", RIP="141.255.232.131";
+ADD SIPRGEXFLT: RGEXN="RMV_ROUTE", SFN="test", MT=OUTREQUEST, MM=INVITE, RGEX="Route:.*", RFT=Delete-Header;
+ADD SIPRGEXFLT: RGEXN="RMV_PEM", SFN="test", MT=OUTREQUEST, MM=INVITE, RGEX="P_Early_Media: supported", RFT=Delete-Header;
+
+3.要求在入局INVITE时干掉maxptime
+ADD SIPFLTSET: SFN="test", RIP="141.255.232.131"; SIPTG上对端IP
+ADD SIPRGEXFLT: RGEXN="RMV_MAXPTIME", SFN="test", MT=INREQUEST, MM=INVITE, RGEX="a=maxptime:240", RFT=Delete-SDP-Line;
+
+
+
+4.将入局视频呼叫的端口置为0
+ADD SIPFLTSET: SFN="test", RIP="141.255.232.131"; ---SIPTG上对端IP
+ADD SIPRGEXFLT: RGEXN="INACTIVE-VIDEO", SFN="test", MT=INREQUEST, MM=INVITE, RGEX="m=video\\s*([0-9]{1,})\\s*RTP/AVP.*", RFT=Replace-SDP-Para, FNUM=1, NRV="0";
+
+5.将500响应中的原因值从cause=38;text="Network out of order"变成cause=149;text="Call Reject"
+ADD SIPFLTSET：SFN=" test", RIP=" 10.20.1.3";
+ADD SIPRGEXFLT: RGEXN="modreason", SFN="test", MT=OUTRESPONSE, MM=INVITE, MRC=500, RGEX="Reason: Q.850\;cause=38\;text=\\\"Network out of order\\\"", RFT=Replace-Header, NRV="Reason: Q.850\;cause=149\;text=\"Call Reject\"";
+
+6.将503响应中的原因值从cause=38;text="Unallocated (unassigned) number"变成cause=149;text="Call Reject"
+ADD SIPFLTSET: SFN="WS_BICS_HEADERCHANGE", RIP="10.211.224.121";
+ADD SIPRGEXFLT: RGEXN="WS_BICS_HEADERCHANGE", SFN="WS_BICS_HEADERCHANGE", MT=OUTRESPONSE, MM=INVITE, MRC=503, RGEX="\" Reason:.*text=\\\"Unallocated \\(unassigned\\) number\\\"\"", RFT=Replace-Header, NRV="Temporary Failure";
+
+7.UGC透传Referred by头域，由于Referred by是认识的头域，我们需要先将它变成“不认识的头域”才能让其透传：
+MOD SIPTG: TGN="UGC1_V_SIP", HDIS=YES;//配置透传“不认识的头域”
+MOD SIPTG: TGN="UGC1_V_SIP2", HDIS=YES;
+ADD SIPRGEXFLT: RGEXN="test1", SFN=1, MT=INREQUEST, MM=INVITE, RGEX="(Referred-By):.*", RFT=Replace-Parameter, FNUM=1, NRV="test-Referred-By-test";
+MOD SIPTG: TGN="UGC1_V_SIP", SFN=1;
+ADD SIPRGEXFLT: RGEXN="test2", SFN=1, MT=OUTREQUEST, MM=INVITE, RGEX="(test-Referred-By-test):.*", RFT=Replace-Parameter, FNUM=1, NRV="Referred-By";
+MOD SIPTG: TGN="UGC1_V_SIP2", SFN=1;
+
+8.MSX收到m=video 0 RTP/AVP 255后回复m=video 0 RTP/AVP
+ADD SIPFLTSET: SFN="test", RIP="141.255.232.131";----这里IP填SIPTG中对端IP。就是收到update那一侧
+ADD SIPRGEXFLT: RGEXN="video", SFN="test", MT=OUTRESPONSE, MM=UPDATE, MRC=200, RGEX="m=video 0 RTP/AVP", RFT=Replace-SDP-Line, NRV="m=video 0 RTP/AVP 255";
+
+9.MSX收到ACK中携带inactive，将其删掉：
+ADD SIPFLTSET: SFN="test", RIP="141.255.232.131";----这里IP填SIPTG中对端IP。就是收到ACK那一侧
+ADD SIPRGEXFLT: RGEXN="rmv-inactive", SFN="test", MT=INREQUEST, MM=ACK, RGEX="a=inactive", RFT=Delete-SDP-Line;
+
+10.MSX删掉出局INVITE中To的transport=udp：
+ADD SIPFLTSET: SFN="test", RIP="141.255.232.131";----这里IP填SIPTG中对端IP。 
+ADD SIPRGEXFLT: RGEXN="rmv-transport", SFN="test", MT=OUTREQUEST, MM=INVITE, RGEX="To:.*(\;transport=udp).*", RFT=Delete-Parameter, FNUM=1;
+
+11.MSX将ACK中mode-change-capability=2改成mode-change-period=2：
+ADD SIPFLTSET: SFN="test", RIP="141.255.232.131";----这里IP填SIPTG中对端IP。 
+ADD SIPRGEXFLT: RGEXN="mod-amr2", SFN="test", MT=INREQUEST, MM=ACK, RGEX="mode-change-capability=2", RFT=Replace-SDP-Para, FNUM=0, NRV="mode-change-period=2";
+
+12.UGC把发出的初始INVITE的From中020前面带的+去掉
+ADD SIPRGEXFLT: RGEXN="RMV-FROM-PLUS", SFN=1, MT=OUTREQUEST, MM=INVITE, RGEX="From: 020.*sip:(\+)020.*", RFT=Delete-Parameter, FNUM=1;
+MOD SIPTG: TGN="XXXX", SFN=1;
+
+13.MSX判断INVITE中a=silenceSupp:off - - - -则加上a=ecan:fb on：
+ADD SIPFLTSET: SFN="test", RIP="xxxxxxx";----这里IP填SIPTG中对端IP。 
+ADD SIPRGEXFLT: RGEXN="add-ec", SFN="test", MT=INREQUEST, MM=ACK, RGEX="mode-change-capability=2", RFT=Replace-SDP-Para, FNUM=0, NRV="mode-change-period=2";
+
+14.MSX判断出局INVITE中首选编解码为Clearmode则删除a=fax：
+ADD SIPFLTSET: SFN="TEST", RIP="xxxxxxx";----这里IP填SIPTG中对端IP。
+ADD SIPRGEXFLT: RGEXN="B71SUNIAII-X_rmv-a-fax", SFN="B71SUNIAII-X", MT=OUTREQUEST, MM=INVITE, RGEX="m=audio.*AVP 12[0-9].*\\s.*12[0-9] CLEARMODE(.*\\s){1,}(a=fax\\s\\s)", RFT=Delete-SDP-Para, FNUM=2;
+
+15.MSX判断入局INVITE中首选编解码不是Clearmode则删除Clearmode：
+ADD SIPFLTSET: SFN="TEST", RIP="xxxxxxx";----这里IP填SIPTG中对端IP。
+ADD SIPRGEXFLT: RGEXN="rmv-clearmode-1", SFN="TEST", MT=INREQUEST, MM=INVITE, RGEX="audio.*AVP\\s[0-9]{1,}.*( 97)(.*\\s){1,}a=rtpmap:97 CLEARMODE", RFT=Delete-SDP-Para, FNUM=1;
+ADD SIPRGEXFLT: RGEXN="rmv-clearmode-2", SFN="TEST", MT=INREQUEST, MM=INVITE, RGEX="audio.*AVP\\s[0-9]{1,}.*97(.*\\s){1,}(a.*97 CLEARMODE.*\\s\\s)", RFT=Delete-SDP-Para, FNUM=2;
+
+16.MSX判断出局INVITE，针对displayname为anonymous的FROM头域，要删掉PAI
+From: "Anonymous"<sip:35924150006@172.20.18.20;transport=udp;user=phone>;tag=dnq5coyo-CC-1020-TRC-612073-OFC-119
+P-Asserted-Identity: <tel:+35924150006>
+ADD SIPFLTSET: SFN="TEST", RIP="xxxxxxx";----这里IP填SIPTG中对端IP。
+ADD SIPRGEXFLT: RGEXN="rmv-PAI", SFN="TEST", MT=OUTREQUEST, MM=INVITE, RGEX="From.*Anonymous.*sip:.*\\s(.*\\s){0,}(P-Asserted-Identity.*\\s\\s)", RFT=Delete-Parameter, FNUM=2;
+
+17.MSX将出局INVITE，针对History-Info头域将 %22User%20Busy%22改成  %22Busy%20Here%22
+ADD SIPFLTSET: SFN="TEST", RIP="xxxxxxx";----这里IP填SIPTG中对端IP。
+ADD SIPRGEXFLT: RGEXN="change-History-busy", SFN="TEST", MT=OUTREQUEST, MM=INVITE, RGEX="History-Info:.*(%22User%20Busy%22).*", RFT=Replace-Parameter, FNUM=1, NRV="%22Busy%20Here%22";
+
+18.出局删除FROM的displayname
+ADD SIPFLTSET: SFN="TEST", RIP="xxxxxxx";----这里IP填SIPTG中对端IP。
+ADD SIPRGEXFLT: RGEXN="rmv-from-displayname", SFN="test", MT=OUTREQUEST, MM=INVITE, RGEX="From: (.*)<.*", RFT=Delete-Parameter, FNUM=1;
+
+19.MSX判断入局INVITE中包含PCMU则删除：
+ADD SIPFLTSET: SFN="TEST", RIP="xxxxxxx";----这里IP填SIPTG中对端IP。
+ADD SIPRGEXFLT: RGEXN="rmv-pcmu-1", SFN="TEST", MT=INREQUEST, MM=INVITE, RGEX="m=audio.*RTP/AVP.*( 0) .*", RFT=Delete-SDP-Para, FNUM=1;注意这里面包含两个空格
+ADD SIPRGEXFLT: RGEXN="rmv-pcmu-2", SFN="TEST", MT=INREQUEST, MM=INVITE, RGEX="m=audio.*RTP/AVP.*( 0)\s", RFT=Delete-SDP-Para, FNUM=1;这个是对于PCMU是最后一个编解码的情况
+ADD SIPRGEXFLT: RGEXN="rmv-pcmu-3", SFN="TEST", MT=INREQUEST, MM=INVITE, RGEX="a=rtpmap:0 PCMU.*", RFT=Delete-SDP-Line;
+
+20.MSX判断入局INVITE中包含octet-align=1则删除WB编解码：
+ADD SIPFLTSET: SFN="TO-SPIDER", RIP="172.40.220.251",CONFIRM=Y;
+ADD SIPRGEXFLT: RGEXN="RMV-OCTETALIGN-WB", SFN="TO-SPIDER", MT=INREQUEST, MM=INVITE, RGEX="(a=rtpmap:([0-9]+)\\sAMR-WB/16000\\s\\s)a=fmtp:\\2.*octet-align=1", RFT=Delete-SDP-Para, FNUM=1;
+
+m=audio 32536 RTP/AVP 102 18 8 0 9 116
+a=rtpmap:102 AMR-WB/16000
+a=fmtp:102 octet-align=1
+
+其中\2表示数“(”第2个所包含的值，对于例子来说就是102。\s\s代表回车换行符
+
+
+21.信令适配删除Route头域或在Route头域中增加未知参数
+1、配置删除出局INVITE消息中的Route头域
+//IP为ADD SIPPAIR配置的远端IP
+ADD SIPFLTSET:SFN="ADAPT_ROUTE", RIP="172.40.222.252";
+ADD SIPRGEXFLT:RGEXN="ADAPT_ROUTE", SFN="ADAPT_ROUTE", MT=OUTREQUEST, MM=INVITE, RGEX="Route:.*", RFT=Delete-Header;
+
+2、配置在出局INIVTE消息的Route头域的端口后增加未知参数（;x-fbi=volt-0;x-afi=7;role=ovcc;ho），如果未知参数固定可以采用此方式，如果未知参数不固定，则不可以采用此方式
+//IP为ADD SIPPAIR配置的远端IP
+ADD SIPFLTSET:SFN="ADAPT_ROUTE", RIP="172.40.222.252";
+ADD SIPRGEXFLT: RGEXN="ADAPT_ROUTE", SFN="ADAPT_ROUTE", MT=OUTREQUEST, MM=INVITE, RGEX="Route:.*(\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}:[0-9]{1,5})", RFT=Add-Parameter, FNUM=1, NRV="\;x-fbi=volt-0\;x-afi=7\;role=ovcc\;ho";
+
+下面是适配前和适配后的Route头域
+Route: <sip:172.40.222.252:5060;transport=udp;lr>
+Route: <sip:172.40.222.252:5060;x-fbi=volt-0;x-afi=7;role=ovcc;ho;transport=udp;lr>
+
+22、将PT值96通过信令适配修改为101
+信令适配修改的话，如果已经有101的pt值了，会导致payload重复，影响其他编解码的正常使用
+而且，无法判断是dtmf时才改，只能简单的将96改成101，会导致其他编解码使用96时也会被修改
+将出局INVITE中96改成101配置数据如下：
+//下面IP为出局侧中继群对应的对端IP
+ADD SIPFLTSET: SFN="MOD_96", RIP="172.40.220.251";
+//将m行中96改为101
+ADD SIPRGEXFLT: RGEXN="MOD_M_96", SFN="MOD_96", MT=OUTREQUEST, MM=INVITE, RGEX="m=audio [0-9]+ RTP/AVP.*\\s+(96)(\\s|$)", RFT=Replace-SDP-Para, FNUM=1, NRV="101";
+//将rtpmap的a行中96改成101
+ADD SIPRGEXFLT: RGEXN="MOD_A_96", SFN="MOD_96", MT=OUTREQUEST, MM=INVITE, RGEX="a=rtpmap:(96)\\s", RFT=Replace-SDP-Para, FNUM=1, NRV="101";
+//96可能对应的是其他编解码，例如AMR，所以还需要将fmtp的a中96也改成101
+ADD SIPRGEXFLT: RGEXN="MOD_A2_96", SFN="MOD_96", MT=OUTREQUEST, MM=INVITE, RGEX="a=fmtp:(96)\\s", RFT=Replace-SDP-Para, FNUM=1, NRV="101";
+
+23、把m=image 15722 udptl t38行的端口号改成0.或把T38的信息全删掉，让本局判断为语音呼叫。
+ADD SIPFLTSET: SFN="INACTIVE-IMAGE", RIP="172.40.220.251";
+ADD SIPRGEXFLT: RGEXN="INACTIVE-IMAGE", SFN="INACTIVE-IMAGE", MT=INREQUEST, MM=INVITE, RGEX="m=image\\s*([0-9]{1,})\\s*udptl.*", RFT=Replace-SDP-Para, FNUM=1, NRV="0";
+
+
+24、删除IPV6的contact头域
+针对当前码流场景，200中包含了两个contact头域（以逗号隔开），第一个为ipv6，第二个为ipv4
+可以通过如下脚本删除第一个contact头域，保留第二个
+//IP为对端的IP
+ADD SIPFLTSET: SFN="TO-IMS", RIP="101.101.101.101";
+ADD SIPRGEXFLT: RGEXN="RMV_IPV6Contact", SFN="TO-IMS", MT=INRESPONSE, MM=REGISTER, MRC=200, RGEX="Contact:\\s*(<sip:\\[([0-9a-fA-F]+:){7}[0-9a-fA-F]+\\]:[0-9]+.+,)", RFT=Delete-Parameter, FNUM=1;
+
+25、删除18x中的超长头域
+183携带超长私有头域协议栈解析失败，当前支持的头域大小最大为508（我们注册给协议栈的内存也增长为512，协议栈可使用的是508），超过该值会失败，可以考虑通过SipDsmSetSizeOfCreatedMsg接口临时修改，缺省值是全局变量gstSipDsmMsgSize定义的
+ADD SIPFLTSET: SFN="NOKIA_OFC_IP", RIP="10.10.10.10";
+ADD SIPRGEXFLT: RGEXN="RMV_UNKOWN_HD", SFN="NOKIA_OFC_IP", MT=INRESPONSE, MM=INVITE, MRC=183, RGEX="P-NokiaSiemens.*", RFT=Delete-Header;
+
+26、删除出局invite的request-uri中的npdi，rn和cic
+因为正则表达式最大长度有限制，如果cic也要删除，需要分两个，如下
+/* IP为需要删除的出局局向的IP，注意如果存在多个局向使用相同IP，则多个局向都会生效 */
+ADD SIPFLTSET:SFN="RMV_RNNPDI_FOR_VMS",RIP=" 10.145.32.61";
+ADD SIPRGEXFLT: RGEXN="RMV_NP_PARA", SFN="RMV_RNNPDI_FOR_VMS", MT=OUTREQUEST, MM=INVITE, RGEX="^INVITE sip:\\+{0,1}[0-9a-eA-E*#]+(\;npdi\;rn=\\+{0,1}[0-9a-eA-E]+)", RFT=Delete-Parameter, FNUM=1;
+ADD SIPRGEXFLT: RGEXN="RMV_CIC_PARA", SFN="RMV_RNNPDI_FOR_VMS", MT=OUTREQUEST, MM=INVITE, RGEX="^INVITE sip:.+(\;cic=\\+{0,1}[0-9a-eA-E]+)", RFT=Delete-Parameter, FNUM=1;
+
+
+27、删除特殊前缀的rn
+ADD SIPRGEXFLT: RGEXN="RMV_NP_PARA", SFN="RMV_RNNPDI_FOR_VMS", MT=OUTREQUEST, MM=INVITE, RGEX="^INVITE tel:\\+{0,1}[0-9a-eA-E*#]+(\;npdi\;rn=2396)", RFT=Delete-Parameter, FNUM=1;
+UGC的下一跳的下一跳不识别rn，但是呼叫具体的路由是在下一跳确定的，所以本局不能删除所有的rn，只能删除某个前缀的
+
+28、用正在表达式，删除18x中的fax，本局按语音接续
+ADD SIPFLTSET: SFN="TO-SPIDER", RIP="172.40.220.251";
+ADD SIPRGEXFLT: RGEXN="RMV-FAX", SFN="TO-SPIDER", MT=INRESPONSE, MM=INVITE, MRC=180, RGEX="a=fax", RFT=Delete-SDP-Line;
+
+29、需要将出局480里的reason头域进行适配，Reason: Q.850;cause=34;text="No circuit/channel available"，text部分适配为No Route to Destination
+//IP为对接局向的对端IP
+ADD SIPFLTSET: SFN="TO-SPIDER ", RIP="172.40.220.251";
+ADD SIPRGEXFLT: RGEXN="MOD-REASON", SFN="TO-SPIDER", MT=OUTRESPONSE, MM=INVITE, MRC=480, RGEX="Reason: Q.850\;cause=34\;text=\"(No circuit/channel available)\" ", RFT=Replace-Parameter, FNUM=1, NRV="No Route to Destination";
+
+30、通过信令适配删除字节对齐的wb编解码，其他根据fmtp行的某参数删除对应的编解码也可以参考，请大家参考
+ADD SIPFLTSET: SFN="TO-SPIDER", RIP="172.40.220.251",CONFIRM=Y;
+ADD SIPRGEXFLT: RGEXN="RMV-OCTETALIGN-WB", SFN="TO-SPIDER", MT=INREQUEST, MM=INVITE, RGEX="(a=rtpmap:([0-9]+)\\sAMR-WB/16000.*\\s\\s)a=fmtp:\\2.*octet-align=1", RFT=Delete-SDP-Para, FNUM=1;
+
+31、删除cic和dai参数
+//IP为对端IP，如果已经存在适配集不需要再添加
+ADD SIPFLTSET: SFN="TO-SPIDER", RIP="10.10.10.10";
+ADD SIPRGEXFLT: RGEXN="RMV_CIC_DAI", SFN="TO-SPIDER", MT=INREQUEST, MM=INVITE, RGEX="^INVITE sip:\\+{0,1}[0-9a-eA-E*#]+(\;cic=[^\;@]+\;dai=[^\;@]+)", RFT=Delete-Parameter, FNUM=1;
+
+32、需要删除出局INVITE中的request-uri和to头域中的+006的+
+//IP是SIPTG里配置的对端的IP
+ADD SIPFLTSET: SFN="TO-SPIDER", RIP="101.10.10.10";
+ADD SIPRGEXFLT: RGEXN="RMV_PLUS", SFN="TO-SPIDER", MT=OUTREQUEST, MM=INVITE, RGEX="^INVITE sip:(\\+006)[0-9a-eA-E*#]+", RFT=Replace-Parameter, FNUM=1, NRV="006";
+to头域是关键头域不建议修改，如果要修改参考如下
+ADD SIPRGEXFLT: RGEXN="RMV_TO_DIS_PLUS", SFN="TO-SPIDER", MT=OUTREQUEST, MM=INVITE, RGEX="^To: \"(\\+006)[0-9a-eA-E*#]+\"<", RFT=Replace-Parameter, FNUM=1, NRV="006";
+ADD SIPRGEXFLT: RGEXN="RMV_TO_N_PLUS", SFN="TO-SPIDER", MT=OUTREQUEST, MM=INVITE, RGEX="To: .*<sip:(\\+006)[0-9a-eA-E*#]+@", RFT=Replace-Parameter, FNUM=1, NRV="006";
+
+33、出局invite消息中添加p-visited-network-id头域
+//IP为SIPTG的对端IP
+ADD SIPFLTSET: SFN="TO-SPIDER", RIP="10.10.10.10";
+//MSC号码和VLR号码请根据实际情况填写，p-visited-network-id头域第一个参数是没有参数名称的，和之前MGCF发送的保持一致
+// NRV参数的最大长度是64，如果号码的长度增加则vlr号码部分不能携带
+ADD SIPRGEXFLT: RGEXN="ADD_PVNI", SFN="TO-SPIDER", MT=OUTREQUEST, MM=INVITE, RGEX="^Call-ID:.*", RFT=Add-Header, NRV="P-Visited-Network-Id: \"+8613912348888\"\;vlr-numb=\"+8613912348888\"";
+
+
+34、删除200消息中的precondition参数
+低版本可以考虑信令适配
+ADD SIPFLTSET: SFN="TO-SPIDER", RIP="XX.XX.XX.XX";
+ADD SIPRGEXFLT: RGEXN="RMV_CURR", SFN="TO-SPIDER", MT=INRESPONSE, MM=INVITE, MRC=200, RGEX="a=curr:qos.*", RFT=Delete-SDP-Line;
+ADD SIPRGEXFLT: RGEXN="RMV_DES", SFN="TO-SPIDER", MT=INRESPONSE, MM=INVITE, MRC=200, RGEX="a=des:qos.*", RFT=Delete-SDP-Line;
+
+
+35、删除PAI和PRIVACY头域
+需要考虑号码相关的privacy
+ADD SIPRGEXFLT: RGEXN="RMV_200_PAI", SFN="TO-SPIDER", MT=OUTRESPONSE, MM=INVITE, MRC=200, RGEX="P-Asserted-Identity:.*", RFT=Delete-Header;
+ADD SIPRGEXFLT: RGEXN="RMV_200_Privacy", SFN="TO-SPIDER", MT=OUTRESPONSE, MM=INVITE, MRC=200, RGEX="Privacy:.*", RFT=Delete-Header;
+
+36、首选编解码是g711时需要删除入局invite的sdp的a=ptime:60，是其他编解码时不删除
+RMV SIPRGEXFLT: RGEXN="RMV_PTIME";
+ADD SIPRGEXFLT: RGEXN="RMV_PTIME2", SFN="1", MT=INREQUEST, MM=INVITE, RGEX="m=audio.*RTP/AVP\\s*[80]\\s(.*\\s)+(a=ptime:60)", RFT=Replace-SDP-Para, FNUM=2, NRV="a=ptime:20";
+可以删除如下sdp中的
+v=0
+o=cp10 138876083757 138876083757 IN IP4 172.16.3.6
+s=SIP Call
+c=IN IP4 10.77.136.4
+t=0 0
+m=audio 37058 RTP/AVP 8 101
+a=rtpmap:8 PCMA/8000
+a=rtpmap:101 telephone-event/8000
+a=fmtp:101 0-15
+a=sendrecv
+a=ptime:60
+
+37、出局的invite消息中history-info头域中有*32号码时，删除history-info头域
+确认*32只是出现在第一个号码
+ADD SIPRGEXFLT: RGEXN="RMV_HISTORY", SFN="1", MT=OUTREQUEST, MM=INVITE, RGEX="History-Info: <sip:\\*32@.*\\s(History-Info:.*\\s)*", RFT=Delete-Parameter, FNUM=0;
