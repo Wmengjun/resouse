@@ -1,4 +1,4 @@
-#!/usr/bin/python2.7
+#!/usr/bin/python
 # -*- coding: UTF-8 -*-
 '''
 Created on 2018年6月29日
@@ -9,8 +9,13 @@ Created on 2018年6月29日
 
 import wx
 from numpy import size
+import json
+import os
+import codecs
+import pandas as pd
 class Mywin(wx.Frame):
     def __init__(self, parent, title):
+#             ctypes.windll.user32.MessageBoxA(0,"同目录下config.json 文件不存在".encode('gb2312'),' 信息'.encode('gb2312'),0)
         super(Mywin, self).__init__(parent, title = title)
 #         菜单栏
         menuBar = wx.MenuBar()
@@ -51,7 +56,7 @@ class Mywin(wx.Frame):
         
         hbox3 = wx.BoxSizer(wx.HORIZONTAL)
         self.button3 = wx.Button(panel, -1,"生成目标文件" ,)
-        self.Bind(wx.EVT_BUTTON, self.OnEnterPressed, self.button3)
+        self.Bind(wx.EVT_BUTTON, self.getnewfiles, self.button3)
         self.button3.SetDefault()
         hbox3.Add(self.button3, proportion = 0, flag = wx.EXPAND|wx.ALL, border = 5)
 
@@ -60,7 +65,7 @@ class Mywin(wx.Frame):
         vbox.Add(hbox1, proportion=0, flag=wx.EXPAND | wx.ALL, border=0)
         vbox.Add(hbox2, proportion=0, flag=wx.EXPAND | wx.ALL, border=0)
         vbox.Add(hbox3, proportion=0, flag=wx.ALIGN_RIGHT|wx.RIGHT, border=5)
-         #设置 面板 panel 的尺寸管理器为 vbox
+        #设置 面板 panel 的尺寸管理器为 vbox
         panel.SetSizer(vbox)
 
         #调整 窗口框架 并显示
@@ -68,6 +73,7 @@ class Mywin(wx.Frame):
         self.Center()
         self.Show()
         self.Fit()
+        
     def OnEnterPressed(self, event):
         print(event.GetId())
         wildcard = "All files (*.*)|*.*"
@@ -80,7 +86,54 @@ class Mywin(wx.Frame):
             print (dlg.GetPath()) #文件夹路径
         dlg.Destroy()
     def getnewfiles(self,event):
-        print("输出 结果")
+        if os.path.exists('./config.json'):
+            json_data=codecs.open("./config.json","r","utf-8").read()
+            self.data = json.loads(json_data)
+        else:
+            dlg=wx.MessageDialog(None,"同目录下config.json 文件不存在","异常",wx.OK|wx.ICON_QUESTION)
+            result=dlg.ShowModal()
+            dlg.Destroy()
+        if os.path.exists(self.t2.GetValue()):
+            self.df = pd.DataFrame(pd.read_excel(str(self.t2.GetValue())))
+        else:
+            dlg=wx.MessageDialog(None,"适配文件不存在","异常",wx.OK|wx.ICON_QUESTION)
+            result=dlg.ShowModal()
+            dlg.Destroy()
+        if os.path.exists(self.t1.GetValue()):
+            self.modeldf = pd.DataFrame(pd.read_excel(str(self.t1.GetValue())))
+        else:
+            dlg=wx.MessageDialog(None,"模板文件不存在","异常",wx.OK|wx.ICON_QUESTION)
+            result=dlg.ShowModal()
+            dlg.Destroy()
+        
+        
+        for i in range(self.df.shape[0]):
+            if (str(self.modeldf.ix[i,'项目']).lower().lstrip()!=str(self.df.ix[i,'项目']).lower().lstrip()) |\
+            (str(self.modeldf.ix[i,'子项目']).lower().lstrip()!=str(self.df.ix[i,'子项目']).lower().lstrip())|\
+            (str(self.modeldf.ix[i,'申报人']).lower().lstrip()!=str(self.df.ix[i,'申报人']).lower().lstrip()):
+                self.df.ix[i,'审批结果*'] = self.data["errorresult"]
+                self.df.ix[i,'审批意见*'] = self.data["opinion1"]
+            elif self.modeldf.ix[i,'工时']!=self.df.ix[i,'工时']:
+                self.df.ix[i,'审批结果*'] = self.data["errorresult"]
+                self.df.ix[i,'审批意见*'] = self.data["opinion2"]
+            elif str(self.modeldf.ix[i,'工时明细'][:(str(self.modeldf.ix[i,'工时明细']).find('remark'))]).lower().lstrip()!=\
+            str(self.df.ix[i,'工时明细'][:(str(self.df.ix[i,'工时明细']).find('remark'))]).lower().lstrip():
+                self.df.ix[i,'审批结果*'] = self.data["errorresult"]
+                self.df.ix[i,'审批意见*'] = self.data["opinion3"]
+            else:
+                self.df.ix[i,'审批结果*'] = self.data["rightresult"]
+                self.df.ix[i,'审批意见*'] = self.data["opinion4"]
+        print(self.df)
+        try:
+            self.df.to_excel(self.t2.GetValue(), sheet_name='sheet0')
+            newpath = "数据审核完成，请在该"+ self.t2.GetValue() +"路径下查看.^_ ^"
+            dlg=wx.MessageDialog(None,newpath,"信息",wx.OK|wx.ICON_QUESTION)
+            result=dlg.ShowModal()
+            dlg.Destroy()
+        except:
+            dlg=wx.MessageDialog(None,"文件打开，不能进行读写操作","异常",wx.OK|wx.ICON_QUESTION)
+            result=dlg.ShowModal()
+            dlg.Destroy()
     def onSelect(self, event):
         dlg=wx.MessageDialog(None,"应用同目录下不可删除配置文件，否则会出现异常","说明",wx.OK|wx.ICON_QUESTION)
         result=dlg.ShowModal()
