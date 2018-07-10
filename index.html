@@ -22,9 +22,8 @@
   <script src="amazeui/assets/js/amazeui.js"></script>
   <script src="amazeui/assets/js/app.js"></script>
   <script src="amazeui/assets/js/amazeui.min.js"></script>
-  <script src="./upload.js"></script>
 
-  
+
 
   <!--操作 -->
   <script type="text/javascript">
@@ -41,6 +40,24 @@
       });
       $('#file-list').html(fileNames);
     });
+    var url = "http://192.168.100.151:7001/GDPaymentCenterServer_FromService/UploadFileServlet.do";
+
+    $('#doc-form-file').on('change', function(){
+      debugger
+            fd = {},
+            fd["paragram"] = 12345,
+            fd["upfile"] = $("#doc-form-file").get(0).files[0],//上传的文件file
+            $.ajax({
+                 url: url,
+                 type: "POST",
+                 processData: false,
+                 contentType: false,
+                 data: fd,
+                 success: function(data) {
+                    console.log(data);
+                 }
+            })
+    })
 });
   </script>
   <style type="text/css">
@@ -81,7 +98,7 @@
   <div class="am-collapse am-topbar-collapse" id="topbar-collapse">
 
     <ul class="am-nav am-nav-pills am-topbar-nav am-topbar-right admin-header-list">
-      
+
       <li class="am-hide-sm-only"><a href="javascript:;" id="admin-fullscreen"><span class="am-icon-arrows-alt"></span> <span class="admin-fullText">开启全屏</span></a></li>
     </ul>
   </div>
@@ -120,16 +137,13 @@
 
         <div class="am-tabs-bd">
           <div class="am-tab-panel am-active">
-            <div class="am-upload" id="my-upload">
             <div class="am-form-group am-form-file" >
               <button type="button" class="am-btn am-btn-danger am-btn-sm">
                 <i class="am-icon-cloud-upload"></i> 选择要上传的文件
               </button>
               <input id="doc-form-file" type="file" class="am-upload-input" multiple>
             </div>
-            <ul class="am-upload-list"></ul>
             <div id="file-list"></div>
-            </div>
             <table class="am-table am-table-bordered am-table-striped am-table-compact">
               <thead>
                 <tr>
