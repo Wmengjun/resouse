@@ -57,6 +57,17 @@ $('#lione').click(function(){
 })
 
 });
+
+function openModal(){
+	$('#login').modal({
+		onConfirm: function() {
+			alert("用户点击了提交");
+		},
+		onCancel: function() {
+			alert("用户点击了关闭按钮");
+		}
+	});
+}
   </script>
   <style type="text/css">
     .option{
@@ -131,33 +142,57 @@ $('#lione').click(function(){
         <ul class="am-tabs-nav am-nav am-nav-tabs">
           <li id="litwo" class="am-active"><a href="javascript: void(0)">任务操作</a></li>
         </ul>
+        <div class="am-modal am-modal-alert" tabindex="-3" id="login">
+           <div class="am-modal-dialog" style="width :50%">
+             <div class="am-modal-hd">新建任务</div>
+               <div class="am-modal-bd">
+               <!--模态框内容-->
+                   <table>
+                       <tr >
+                           <td>创建人:</td>
+                           <td style="padding: 10px" ><input style="width:400px" id="file-list" type="text" class="am-form-field "  style="width:150px"placeholder="创建人"></td>
+                           <td></td>
+                       </tr>
+                       <tr >
+                           <td>局点名称:</td>
+                           <td style="padding: 10px"><input  style="width:400px" id="file-list" type="text" class="am-form-field"  style="width:150px"placeholder="局点名称"></td>
+                           <td></td>
+                       </tr>
+                       <tr >
+                           <td>局点类型:</td>
+                           <td style="padding: 10px" >
+                             <select data-am-selected="{btnWidth:'100%',btnStyle:'default'}">
+                               <option value="a"selected>V局</option>
+                               <option value="b" >G/T局</option>
+                               <option value="o">V局&G/T局</option>
+                           </select>
+                         </td>
+                         <td></td>
+                       </tr>
+                       <tr >
+                           <td>现网数据：</td>
+                           <td style="padding: 10px" > <input style="width:400px" id="file-list" type="text" class="am-form-field"  style="width:150px"placeholder="现网数据"></td>
+                           <td>
+                             <div class=" am-form-file" style="display: inline">
+                               <button type="button" class="am-btn am-btn-danger am-btn-sm">
+                                 <i class="am-icon-cloud-upload"></i> 导入</button>
+                                 <input id="doc-form-file" type="file" multiple>
+                             </div>
+                           </td>
+                       </tr>
+                   </table>
+               </div>
+               <div class="am-modal-footer">
+                 <!--关键是在这里为两个按钮加上data-am-modal-confirm与data-am-modal-cancel属性-->
+                   <span class="am-modal-btn" data-am-modal-confirm>取消</span>
+                   <span class="am-modal-btn" data-am-modal-cancel>新建任务</span>
+               </div>
+           </div>
+       </div>
 
-        <div class="am-tabs-bd">
-          <div class="am-tab-panel">
-            <div class="am-form-inline">
-              <span>创建人:</span>
-               <input id="file-list" type="text" class="am-form-field"  style="width:150px"placeholder="创建人">
-              <span>局点名称:</span>
-               <input id="file-list" type="text" class="am-form-field"  style="width:150px"placeholder="局点名称">
-              <span>局点类型:</span>
-              <select data-am-selected="{btnWidth:'10%',btnStyle:'default'}">
-                <option value="a">V局</option>
-                <option value="b" selected>G/T局</option>
-                <option value="o">V局&G/T局</option>
-              </select>
-              <span>现网数据：</span>
-               <input id="file-list" type="text" class="am-form-field"  style="width:150px"placeholder="现网数据">
-                <div class=" am-form-file" style="display: inline">
-                <button type="button" class="am-btn am-btn-danger am-btn-sm">
-                <i class="am-icon-cloud-upload"></i> 导入</button>
-                <input id="doc-form-file" type="file" multiple>
-                </div>
-              <button type="button" class="am-btn am-btn-primary btn-loading-example"> <i id="buttonli"></i>新建</button>
-            </div>
-          </div>
           <div class="am-tab-panel am-active">
             <div class="am-form-inline">
-              <button type="button" class="am-btn am-btn-danger"> 
+              <button type="button" class="am-btn am-btn-danger" id="doc-confirm-toggle" onClick="openModal()">
               <i class="am-icon-"></i>新建任务</button>
               <span>局点类型</span>
               <select data-am-selected="{btnWidth:'10%',btnStyle:'default'}">
@@ -189,7 +224,6 @@ $('#lione').click(function(){
                   <td>
                   <div class="am-btn-toolbar">
                     <div class="am-btn-group am-btn-group-xs">
-                      <button class="am-btn am-btn-default am-btn-xs am-text-secondary"><span class="am-icon-pencil-square-o"></span> 修改</button>
                       <button class="am-btn am-btn-default am-btn-xs am-text-danger am-hide-sm-only"><span class="am-icon-trash-o"></span> 删除</button>
                       <button id="button1"type="button" class="am-btn am-btn-default am-btn-xs am-text-secondary"> <span id="buttonspan"class="">
                       </span>运行</button>
@@ -205,7 +239,6 @@ $('#lione').click(function(){
                   <td>
                   <div class="am-btn-toolbar">
                     <div class="am-btn-group am-btn-group-xs">
-                      <button class="am-btn am-btn-default am-btn-xs am-text-secondary"><span class="am-icon-pencil-square-o"></span> 修改</button>
                       <button class="am-btn am-btn-default am-btn-xs am-text-danger am-hide-sm-only"><span class="am-icon-trash-o"></span> 删除</button>
                       <button id="button1"type="button" class="am-btn am-btn-default am-btn-xs am-text-secondary"> <span id="buttonspan"class="">
                       </span>运行</button>
@@ -221,7 +254,6 @@ $('#lione').click(function(){
                   <td>
                   <div class="am-btn-toolbar">
                     <div class="am-btn-group am-btn-group-xs">
-                      <button class="am-btn am-btn-default am-btn-xs am-text-secondary"><span class="am-icon-pencil-square-o"></span> 修改</button>
                       <button class="am-btn am-btn-default am-btn-xs am-text-danger am-hide-sm-only"><span class="am-icon-trash-o"></span> 删除</button>
                       <button id="button1"type="button" class="am-btn am-btn-default am-btn-xs am-text-secondary"> <span id="buttonspan"class="">
                       </span>运行</button>
@@ -237,7 +269,6 @@ $('#lione').click(function(){
                   <td>
                   <div class="am-btn-toolbar">
                     <div class="am-btn-group am-btn-group-xs">
-                      <button class="am-btn am-btn-default am-btn-xs am-text-secondary"><span class="am-icon-pencil-square-o"></span> 修改</button>
                       <button class="am-btn am-btn-default am-btn-xs am-text-danger am-hide-sm-only"><span class="am-icon-trash-o"></span> 删除</button>
                       <button id="button1"type="button" class="am-btn am-btn-default am-btn-xs am-text-secondary"> <span id="buttonspan"class="">
                       </span>运行</button>
@@ -253,7 +284,6 @@ $('#lione').click(function(){
                   <td>
                   <div class="am-btn-toolbar">
                     <div class="am-btn-group am-btn-group-xs">
-                      <button class="am-btn am-btn-default am-btn-xs am-text-secondary"><span class="am-icon-pencil-square-o"></span> 修改</button>
                       <button class="am-btn am-btn-default am-btn-xs am-text-danger am-hide-sm-only"><span class="am-icon-trash-o"></span> 删除</button>
                       <button id="button1"type="button" class="am-btn am-btn-default am-btn-xs am-text-secondary"> <span id="buttonspan"class="">
                       </span>运行</button>
